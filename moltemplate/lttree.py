@@ -938,6 +938,84 @@ def main():
                      settings,
                      False)
 
+        # WARNING: The following code has been vibe-developed with Copilot.
+        #          Blame Otello M Roscioni for unexpected behaviour!!
+        #
+        # Apply any type-modifications requested via 'type' commands
+        # Collect modifications stored on instance objects (if any)
+        def _gather_type_mods(instobj, out_list):
+            # Check instance attribute first
+            if hasattr(instobj, 'type_modifications'):
+                for mod in instobj.type_modifications:
+                    out_list.append(mod)
+            # Then check the global map fallback (imported from ttree)
+            try:
+                from .ttree import _GLOBAL_TYPE_MODS
+            except Exception:
+                try:
+                    from ttree import _GLOBAL_TYPE_MODS
+                except Exception:
+                    _GLOBAL_TYPE_MODS = {}
+            if instobj in _GLOBAL_TYPE_MODS:
+                for mod in _GLOBAL_TYPE_MODS[instobj]:
+                    out_list.append(mod)
+            # Recurse into children (if any)
+            children = getattr(instobj, 'children', None)
+            if children:
+                for child in children.values():
+                    _gather_type_mods(child, out_list)
+
+        type_mods = []
+        _gather_type_mods(g_objects, type_mods)
+
+        if (len(type_mods) > 0):
+            import re
+            # regexes for the various @-type tokens
+            # Allow optional '/' following the '@' (templates sometimes
+            # include a leading '/' after '@', e.g. '@/atom:...').
+            atomvar_re = re.compile(r'@/?atom:\S+')
+            bondvar_re = re.compile(r'@/?bond:\S+')
+            anglevar_re = re.compile(r'@/?angle:\S+')
+            dihedralvar_re = re.compile(r'@/?dihedral:\S+')
+            impropervar_re = re.compile(r'@/?improper:\S+')
+
+            # Helper to apply replacements to a particular data file key
+            def _apply_replacements(filename, var_re):
+                if filename not in files_content:
+                    return
+                new_blocks = []
+                for block in files_content[filename]:
+                    lines = block.split('\n')
+                    for i, line in enumerate(lines):
+                        for (target_path, new_type) in type_mods:
+                            # target_path is NodeToStr(instobj) e.g. '/tobe[0][1][1]/chainA[0]'
+                            # In templates the path often appears without a leading '/', so check both
+                            tp = target_path.lstrip('/')
+                            if (tp != '') and (tp in line):
+                                m = var_re.search(line)
+                                if m:
+                                    start, end = m.span()
+                                    old_token = line[start:end]
+                                    line = line[:start] + new_type + line[end:]
+                                    lines[i] = line
+                                    break
+                    new_blocks.append('\n'.join(lines))
+                files_content[filename] = new_blocks
+
+            # Apply atom-type replacements in Data Atoms
+            _apply_replacements(data_atoms, atomvar_re)
+
+            # If rebuild was requested (we stored instobj.rebuild_requested earlier),
+            # update the types for bonds/angles/dihedrals/impropers that mention
+            # the modified atom instances.
+            # We conservatively apply changes if any type_mods exist (user asked to change types),
+            # updating @bond, @angle, @dihedral, and @improper tokens in their respective files.
+            _apply_replacements(data_bonds, bondvar_re)
+            _apply_replacements(data_bond_list, bondvar_re)
+            _apply_replacements(data_angles, anglevar_re)
+            _apply_replacements(data_dihedrals, dihedralvar_re)
+            _apply_replacements(data_impropers, impropervar_re)
+
         # Finally: write the rendered text to actual files.
 
         # Erase the files that will be written to:
@@ -965,6 +1043,158 @@ def main():
         WriteVarBindingsFile(g_objectdefs)
         WriteVarBindingsFile(g_objects)
         sys.stderr.write(' done\n')
+
+        # WARNING: The following code has been vibe-developed with Copilot.
+        #          Blame Otello M Roscioni for unexpected behaviour!!
+        #
+        # If any rebuild was requested, redo rendering of the "Data Atoms"
+        # section by reading the generated "Data Atoms.template" file and
+        # updating the rendered data file's atom-type column accordingly.
+        # This keeps the rebuild operation simple and local (as requested).
+        try:
+            # Determine whether any rebuild flags were set on instances
+            rebuild_needed = False
+            try:
+                from .ttree import _GLOBAL_REBUILD_REQUESTS
+            except Exception:
+                try:
+                    from ttree import _GLOBAL_REBUILD_REQUESTS
+                except Exception:
+                    _GLOBAL_REBUILD_REQUESTS = set()
+
+            if len(_GLOBAL_REBUILD_REQUESTS) > 0:
+                rebuild_needed = True
+            else:
+                # Scan instance tree for flags
+                def _scan_rebuild(instobj):
+                    if hasattr(instobj, 'rebuild_requested') and instobj.rebuild_requested:
+                        return True
+                    children = getattr(instobj, 'children', None)
+                    if children:
+                        for c in children.values():
+                            if _scan_rebuild(c):
+                                return True
+                    return False
+
+                try:
+                    if _scan_rebuild(g_objects):
+                        rebuild_needed = True
+                except Exception:
+                    pass
+
+            if rebuild_needed:
+                # rebuild requested; re-rendering Data Atoms from template
+                import glob
+                # Find the first Data Atoms.template file produced.
+                templ_paths = glob.glob('**/' + data_atoms + '.template', recursive=True)
+                if len(templ_paths) == 0:
+                    # No template found
+                    pass
+                else:
+                    templ_path = templ_paths[0]
+                    # Parse template file to extract desired atom-type integers
+                    new_types = []
+                    import re
+                    atom_type_re = re.compile(r'@/?atom:[^/]+/([0-9]+)')
+                    with open(templ_path, 'r') as f:
+                        for line in f:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            m = atom_type_re.search(line)
+                            if m:
+                                new_types.append(m.group(1))
+                            else:
+                                # No atom-type var in this line; append None to keep alignment
+                                new_types.append(None)
+
+                    # Find the rendered data file. It may be a full .data file
+                    # (containing a header and an 'Atoms' section) or a fragment
+                    # named exactly like `Data Atoms` (no extension). Search for
+                    # both possibilities.
+                    target_data_path = None
+                    # First look for fragment files named exactly like the data_atoms
+                    frag_paths = glob.glob('**/' + data_atoms, recursive=True)
+                    if len(frag_paths) > 0:
+                        target_data_path = frag_paths[0]
+                        frag_mode = True
+                    else:
+                        # Fallback: look for a .data file containing an Atoms section
+                        data_paths = glob.glob('**/*.data', recursive=True)
+                        for p in data_paths:
+                            try:
+                                with open(p, 'r') as f:
+                                    text = f.read()
+                                if 'Atoms  # full' in text or '\nAtoms\n' in text:
+                                    target_data_path = p
+                                    frag_mode = False
+                                    break
+                            except Exception:
+                                continue
+
+                    if target_data_path is None:
+                        # No target data file found
+                        pass
+                    else:
+                        # Read the data file and update accordingly
+                        with open(target_data_path, 'r') as f:
+                            lines = f.readlines()
+
+                        out_lines = []
+                        atom_index = 0
+
+                        if frag_mode:
+                            # The file is just the atoms fragment (one atom per line)
+                            for line in lines:
+                                sline = line.strip()
+                                if sline == '':
+                                    out_lines.append(line)
+                                    continue
+                                parts = sline.split()
+                                if len(parts) >= 3 and atom_index < len(new_types):
+                                    if new_types[atom_index] is not None:
+                                        old = parts[2]
+                                        parts[2] = new_types[atom_index]
+                                    out_lines.append(' '.join(parts) + '\n')
+                                    atom_index += 1
+                                else:
+                                    out_lines.append(line)
+                        else:
+                            # Full .data file with headers. Find the Atoms section header
+                            atoms_stage = 0  # 0=before header, 1=header seen waiting for blank, 2=inside atoms
+                            for line in lines:
+                                if atoms_stage == 0:
+                                    out_lines.append(line)
+                                    if line.strip().startswith('Atoms'):
+                                        atoms_stage = 1
+                                    continue
+                                elif atoms_stage == 1:
+                                    out_lines.append(line)
+                                    if line.strip() == '':
+                                        atoms_stage = 2
+                                    continue
+                                else:
+                                    if line.strip() == '':
+                                        atoms_stage = 0
+                                        out_lines.append(line)
+                                        continue
+                                    parts = line.split()
+                                    if len(parts) >= 3 and atom_index < len(new_types):
+                                        if new_types[atom_index] is not None:
+                                            old = parts[2]
+                                            parts[2] = new_types[atom_index]
+                                        out_lines.append(' '.join(parts) + '\n')
+                                        atom_index += 1
+                                    else:
+                                        out_lines.append(line)
+
+                        # Write back the updated data file
+                        with open(target_data_path, 'w') as f:
+                            f.writelines(out_lines)
+                        # Rebuild applied to data file
+        except Exception:
+            # swallow errors during optional rebuild step
+            pass
 
     except (ValueError, InputError) as err:
         if isinstance(err, ValueError):

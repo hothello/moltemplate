@@ -105,6 +105,13 @@ if g_filename.rfind('.py') != -1:
 g_date_str = '2022-1-11'
 g_version_str = '0.86.8'
 
+# Module-level storage for per-instance type modifications and rebuild requests.
+# Some instance objects (InstanceObjBasic) use __slots__ and cannot accept
+# arbitrary new attributes.  Use these maps as a fallback when attributes
+# cannot be attached directly to the instance.
+_GLOBAL_TYPE_MODS = {}
+_GLOBAL_REBUILD_REQUESTS = set()
+
 
 class ClassReference(object):
     """ Every class defined by the user (stored in an StaticObj data structure)
@@ -259,6 +266,33 @@ class DeleteCommand(Command):
 
     def __copy__(self):
         return DeleteCommand(self.srcloc)
+
+
+class TypeCommand(Command):
+    __slots__ = ["new_type"]
+
+    def __init__(self, new_type=None, srcloc=None):
+        Command.__init__(self, srcloc)
+        self.new_type = new_type
+
+    def __str__(self):
+        return 'TypeCommand(' + str(self.new_type) + ')'
+
+    def __copy__(self):
+        return TypeCommand(self.new_type, self.srcloc)
+
+
+class RebuildCommand(Command):
+    __slots__ = []
+
+    def __init__(self, srcloc=None):
+        Command.__init__(self, srcloc)
+
+    def __str__(self):
+        return 'RebuildCommand()'
+
+    def __copy__(self):
+        return RebuildCommand(self.srcloc)
 
 
 class StackableCommand(Command):
@@ -2237,6 +2271,37 @@ class StaticObj(object):
                 delete_command = DeleteCommand(instobj_srcloc)
                 mod_command = ModCommand(delete_command,
                                          instobj_descr_str)
+
+                # WARNING: The following code has been vibe-developed with Copilot.
+                #          Blame Otello M Roscioni for unexpected behaviour!!
+                #
+                self.instance_commands.append(mod_command)
+            elif cmd_token == 'type':
+
+                # Syntax: type <object_descr> <new_type_descr>
+                instobj_descr_str = lex.get_token()
+                instobj_srcloc = lex.GetSrcLoc()
+                new_type_descr = lex.get_token()
+                # Strip trailing '}' characters that may be attached when
+                # the command is written in the compact form: type{ ... }
+                if isinstance(new_type_descr, str):
+                    # Only strip braces that close the command, not braces
+                    # that may belong to variable syntax like '@{...}'.
+                    # If the token ends with a '}', and does not start with '{',
+                    # it's likely the trailing command brace. Remove any
+                    # trailing '}' characters.
+                    if (new_type_descr.endswith('}') and not new_type_descr.startswith('{')):
+                        new_type_descr = new_type_descr.rstrip('}')
+
+                type_command = TypeCommand(new_type_descr, instobj_srcloc)
+                mod_command = ModCommand(type_command,
+                                         instobj_descr_str)
+                self.instance_commands.append(mod_command)
+
+            elif cmd_token == 'rebuild':
+                # Syntax: rebuild
+                rebuild_command = RebuildCommand(lex.GetSrcLoc())
+                mod_command = ModCommand(rebuild_command, './')
                 self.instance_commands.append(mod_command)
 
             elif cmd_token == 'using':
@@ -3017,19 +3082,68 @@ class StaticObj(object):
                                     0, pop_mod_command)
 
                     else:
-                        # Otherwise, the cmd_token is not any of these:
-                        # "write", "write_once", "replace",
-                        # "create_var", "create_static_var",
-                        # "delete", or "category".
-                        # ... and it is ALSO not any of these:
-                        # the name of a class (StaticObj), or
-                        # the name of an instance (InstanceObj)
-                        #   followed by either a '.' or "= new"
+                        # WARNING: The following code has been vibe-developed with Copilot.
+                        #          Blame Otello M Roscioni for unexpected behaviour!!
                         #
-                        # In that case, it is a syntax error:
-                        raise InputError('Error(' + g_module_name + '.StaticObj.Parse()):\n'
-                                         '       Syntax error at or before ' + lex.error_leader() + '\n'
-                                         '       \"' + object_name + ' ' + next_symbol + '\".')
+                        # Replace fused token like 'type{...}' with separate tokens 
+                        if object_name.startswith('type{'):
+                            open_brace_index = object_name.find('{')
+                            lex.push_token('{')
+                            lex.push_token(object_name[open_brace_index+1:])
+                            lex.push_token('}')
+                            object_name = object_name[:open_brace_index]
+                            next_symbol = lex.get_token()
+                        
+                        if next_symbol == '}':
+                            try:
+                                src_loc = lex.GetSrcLoc()
+                                if (hasattr(src_loc, 'infile') and src_loc.infile):
+                                    with open(src_loc.infile, 'r') as f:
+                                        all_lines = f.readlines()
+                                    # lineno is 1-based
+                                    if 1 <= src_loc.lineno <= len(all_lines):
+                                        src_line = all_lines[src_loc.lineno - 1]
+                                    else:
+                                        src_line = ''
+                                else:
+                                    src_line = ''
+                            except Exception:
+                                src_line = ''
+
+                            if src_line:
+                                # Look for the nearest 'type{' on this line.
+                                idx = src_line.find('type{')
+                                if idx != -1:
+                                    j = src_line.find('}', idx + 5)
+                                    if j != -1:
+                                        inner = src_line[idx + 5:j].strip()
+                                        # split on whitespace (simple tokenization)
+                                        parts = inner.split()
+                                        if len(parts) >= 2:
+                                            instobj_descr_str = parts[0]
+                                            new_type_descr = ' '.join(parts[1:])
+                                            instobj_srcloc = lex.GetSrcLoc()
+
+                                            type_command = TypeCommand(new_type_descr, instobj_srcloc)
+                                            mod_command = ModCommand(type_command, instobj_descr_str)
+                                            self.instance_commands.append(mod_command)
+                                            # handled compact form; continue parsing
+                                            continue
+
+                            # Otherwise, the cmd_token is not any of these:
+                            # "write", "write_once", "replace",
+                            # "create_var", "create_static_var",
+                            # "delete", or "category".
+                            # ... and it is ALSO not any of these:
+                            # the name of a class (StaticObj), or
+                            # the name of an instance (InstanceObj)
+                            #   followed by either a '.' or "= new"
+                            #
+                            # In that case, it is a syntax error:
+                            raise InputError('Error(' + g_module_name + '.StaticObj.Parse()):\n'
+                                             '       Syntax error at or before ' + lex.error_leader() + '\n'
+                                             '       \"' + object_name + ' ' + next_symbol + '\"\n'
+                                             '       Related to a post-instance command.' )
 
         # Keep track of the location in the user's input files
         # where the definition of this object ends.
@@ -3952,6 +4066,57 @@ class InstanceObj(InstanceObjBasic):
                 for instobj in instobj_list:
                     instobj.DeleteSelf()
                     # instobj.DeleteProgeny()
+
+            # WARNING: The following code has been vibe-developed with Copilot.
+            #          Blame Otello M Roscioni for unexpected behaviour!!
+            #
+            elif isinstance(mod_command.command, TypeCommand):
+
+                # Apply type override requests to the matching instance objects.
+
+                for instobj in instobj_list:
+                    # Prefer attaching the data to the instance itself if
+                    # possible.  Otherwise use the module-level fallback map.
+                    try:
+                        # Try to set attribute if the instance supports it.
+                        if hasattr(instobj, '__dict__'):
+                            if not hasattr(instobj, 'type_modifications'):
+                                instobj.type_modifications = []
+                            target_path = NodeToStr(instobj)
+                            instobj.type_modifications.append((target_path, mod_command.command.new_type))
+                        else:
+                            # Use the global map keyed by the instance object.
+                            lst = _GLOBAL_TYPE_MODS.get(instobj)
+                            if lst is None:
+                                lst = []
+                                _GLOBAL_TYPE_MODS[instobj] = lst
+                            target_path = NodeToStr(instobj)
+                            lst.append((target_path, mod_command.command.new_type))
+                    except Exception:
+                        # Best-effort fallback for target_path
+                        try:
+                            target_path = NodeToStr(instobj)
+                        except Exception:
+                            target_path = str(getattr(instobj, 'name', ''))
+                        if hasattr(instobj, '__dict__'):
+                            if not hasattr(instobj, 'type_modifications'):
+                                instobj.type_modifications = []
+                            instobj.type_modifications.append((target_path, mod_command.command.new_type))
+                        else:
+                            lst = _GLOBAL_TYPE_MODS.get(instobj)
+                            if lst is None:
+                                lst = []
+                                _GLOBAL_TYPE_MODS[instobj] = lst
+                            lst.append((target_path, mod_command.command.new_type))
+
+            elif isinstance(mod_command.command, RebuildCommand):
+                # Set a flag on each matched instobj indicating rebuild requested.
+                for instobj in instobj_list:
+                    # If instance allows attributes, set directly.
+                    if hasattr(instobj, '__dict__'):
+                        instobj.rebuild_requested = True
+                    else:
+                        _GLOBAL_REBUILD_REQUESTS.add(instobj)
 
             elif len(instobj_list) == 0:
 
