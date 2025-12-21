@@ -201,6 +201,7 @@ in_init="In Init"
 in_settings="In Settings"
 in_coords="In Coords"
 in_charges="In Charges"
+in_alchemical="In Alchemical"
 
 #     If present, the various "In " files contain commands which should be
 #     included by the user in their LAMMPS input script. (This task is left
@@ -1040,6 +1041,15 @@ for file in $MOLTEMPLATE_TEMP_FILES; do
 done
 IFS=$OIFS
 
+# Apply alchemical transformation
+if [ -s "${in_alchemical}.template" ]; then
+    if ! $PYTHON_COMMAND "${PY_SCR_DIR}/alchemical.py" \
+                                    "${in_alchemical}.template" \
+                                    "${data_atoms}.template"; then
+        ERR_INTERNAL
+    fi
+    rm -f "${in_alchemical}"
+fi
 
 if [ -s "${data_atoms}" ]; then
     if ! $PYTHON_COMMAND "${PY_SCR_DIR}/remove_duplicate_atoms.py" \
