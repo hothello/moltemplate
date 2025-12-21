@@ -17,7 +17,7 @@ import sys
 import re
 
 
-def transform_data_atoms_template(template_path='Data Atoms.template', output_path='Data Atoms', assignments_path='ttree_assignments.txt'):
+def render_template(template_path='Data Atoms.template', output_path='Data Atoms', assignments_path='ttree_assignments.txt'):
     """
     Replace the variables in the 'Data Atoms.template' using the assignments in 'ttree_assignments.txt',
     and write the result into 'Data Atoms'.
@@ -138,7 +138,7 @@ def main():
     print(f'Alchemical transformation\nUpdated {changed} lines in {data_path}\n')
     
     # override the Data Atoms file.
-    transform_data_atoms_template()
+    render_template()
 
 if __name__ == '__main__':
     main()
