@@ -17,12 +17,13 @@ import sys
 import re
 
 
-def render_template(template_path='Data Atoms.template', output_path='Data Atoms', assignments_path='ttree_assignments.txt'):
+def render_template(template_path):
     """
     Replace the variables in the 'Data Atoms.template' using the assignments in 'ttree_assignments.txt',
     and write the result into 'Data Atoms'.
     """
     # Load variable bindings from ttree_assignments.txt
+    assignments_path='ttree_assignments.txt'
     var_bindings = {}
     try:
         with open(assignments_path, 'r', encoding='utf-8') as f:
@@ -33,8 +34,9 @@ def render_template(template_path='Data Atoms.template', output_path='Data Atoms
                 
                 parts = line.split()
                 if len(parts) > 1:
-                    var_bindings[parts[0]] = parts[1]
-                    print(f"Substituting variable {parts[0]} with value {parts[1]}")
+                    key = parts[0]
+                    val = parts[1]
+                    var_bindings[key] = val
     
     except FileNotFoundError:
         sys.stderr.write(f'Warning: {assignments_path} not found. No variable substitution performed.\n')
@@ -48,6 +50,7 @@ def render_template(template_path='Data Atoms.template', output_path='Data Atoms
         text = text.replace(var_name, value)
     
     # Write the rendered text
+    output_path = template_path.replace('.template', '')
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(text)
 
@@ -68,7 +71,7 @@ def load_type_mappings(in_alchemical_path):
             parts = line.split()
             if len(parts) < 5:
                 continue
-            if parts[0] != 'set' or parts[1] != 'atom':
+            if parts[0].lower() != 'set' or parts[1].lower() != 'atom':
                 continue
 
             key = parts[2]
@@ -138,7 +141,7 @@ def main():
     print(f'Alchemical transformation\nUpdated {changed} lines in {data_path}\n')
     
     # override the Data Atoms file.
-    render_template()
+    render_template(data_path)
 
 if __name__ == '__main__':
     main()
