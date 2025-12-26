@@ -17,44 +17,6 @@ import sys
 import re
 
 
-def render_template(template_path):
-    """
-    Replace the variables in the 'Data Atoms.template' using the assignments in 'ttree_assignments.txt',
-    and write the result into 'Data Atoms'.
-    """
-    # Load variable bindings from ttree_assignments.txt
-    assignments_path='ttree_assignments.txt'
-    var_bindings = {}
-    try:
-        with open(assignments_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith('#'):
-                    continue
-                
-                parts = line.split()
-                if len(parts) > 1:
-                    key = parts[0]
-                    val = parts[1]
-                    var_bindings[key] = val
-    
-    except FileNotFoundError:
-        sys.stderr.write(f'Warning: {assignments_path} not found. No variable substitution performed.\n')
-    
-    # Read the template
-    with open(template_path, 'r', encoding='utf-8') as f:
-        text = f.read()
-    
-    # Substitute variables
-    for var_name, value in var_bindings.items():
-        text = text.replace(var_name, value)
-    
-    # Write the rendered text
-    output_path = template_path.replace('.template', '')
-    with open(output_path, 'w', encoding='utf-8') as f:
-        f.write(text)
-
-
 def load_type_mappings(in_alchemical_path):
     """
     The content of the mapping file is based on the LAMMPS set command, as in:
@@ -109,16 +71,15 @@ def update_data_atoms(data_atoms_path, mappings):
     with open(data_atoms_path, 'r', encoding='utf-8') as f:
         for raw in f:
             line = raw.rstrip('\n')
-            new_line = line
             for rx, val in compiled:
                 if rx.search(line):
                     parts = line.split()
                     if len(parts) >= 3:
                         parts[2] = val
-                        new_line = ' '.join(parts)
+                        line = ' '.join(parts)
                         changed += 1
                     break
-            out_lines.append(new_line)
+            out_lines.append(line)
 
     if changed:
         with open(data_atoms_path, 'w', encoding='utf-8') as f:
@@ -139,9 +100,7 @@ def main():
 
     changed = update_data_atoms(data_path, mappings)
     print(f'Alchemical transformation\nUpdated {changed} lines in {data_path}\n')
-    
-    # override the Data Atoms file.
-    render_template(data_path)
+
 
 if __name__ == '__main__':
     main()
