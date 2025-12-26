@@ -15,7 +15,11 @@ g_version_str = '0.1.0'
 
 import sys
 import re
-
+import os
+try:
+    from .lttree_styles import AtomStyle2ColNames, ColNames2AidAtypeMolid
+except Exception:
+    from lttree_styles import AtomStyle2ColNames, ColNames2AidAtypeMolid
 
 def load_type_mappings(in_alchemical_path):
     """
@@ -23,7 +27,8 @@ def load_type_mappings(in_alchemical_path):
     
     set atom mol1[2]/C1 type @atom:OPLSAA/99
     """
-    mappings = []  # list of (pattern_str, type_value)
+    mappings = []  # New atom type mappings
+    shape_mappings = []  # New atom shape mappings
     with open(in_alchemical_path, 'r', encoding='utf-8') as f:
         for raw in f:
             line = raw.strip()
@@ -36,10 +41,17 @@ def load_type_mappings(in_alchemical_path):
             if parts[0].lower() != 'set' or parts[1].lower() != 'atom':
                 continue
 
-            key = parts[2]
-            val = parts[4]
-            mappings.append((key, val))
-    return mappings
+            # add (key, val) tuples to mappings:
+            if parts[3].lower() == 'type':
+                key = parts[2]
+                val = parts[4]
+                mappings.append((key, val))
+            elif parts[3].lower() == 'shape':
+                key = parts[2]
+                val = f"{parts[4]} {parts[5]} {parts[6]}"
+                shape_mappings.append((key, val))
+
+    return mappings, shape_mappings
 
 
 def make_regex_from_key(key):
@@ -61,8 +73,7 @@ def make_regex_from_key(key):
     return re.compile(pattern)
 
 
-def update_data_atoms(data_atoms_path, mappings):
-
+def update_data_atoms(data_atoms_path, type, mappings):
     # compile regexes
     compiled = [(make_regex_from_key(k), v) for k, v in mappings]
 
@@ -75,7 +86,7 @@ def update_data_atoms(data_atoms_path, mappings):
                 if rx.search(line):
                     parts = line.split()
                     if len(parts) >= 3:
-                        parts[2] = val
+                        parts[type] = val
                         line = ' '.join(parts)
                         changed += 1
                     break
@@ -88,18 +99,69 @@ def update_data_atoms(data_atoms_path, mappings):
     return changed
 
 
+def update_ellipsoids(ellipsoid_path, shape_mappings):
+    # compile regexes
+    compiled = [(make_regex_from_key(k), v) for k, v in shape_mappings]
+
+    out_lines = []
+    changed = 0
+    with open(ellipsoid_path, 'r', encoding='utf-8') as f:
+        for raw in f:
+            line = raw.rstrip('\n')
+            for rx, val in compiled:
+                if rx.search(line):
+                    parts = line.split()
+                    if len(parts) == 8:
+                        parts[1] = val
+                        del parts[2:4]
+                        line = ' '.join(parts)
+                        changed += 1
+                    break
+            out_lines.append(line)
+
+    if changed:
+        with open(ellipsoid_path, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(out_lines) + '\n')
+
+    return changed
+ 
+
 def main():
 
-    in_path = sys.argv[1]
+    postprocess_path = sys.argv[1]
     data_path = sys.argv[2]
+    ellipsoid_path = sys.argv[3]
+    ttree_args = sys.argv[4]
 
-    mappings = load_type_mappings(in_path)
+    # Get i_atomtype from atomstyle in ttree_args.
+    args = str(ttree_args).split()
+    atom_style_string = args[args.index("-atomstyle") + 1] if "-atomstyle" in args else "full"
+
+    # Remove surrounding quotes if present
+    if (len(atom_style_string) > 2 and
+            ((atom_style_string[0] == atom_style_string[-1]) and
+                atom_style_string[0] in ('"', "'"))):
+        atom_style_string = atom_style_string[1:-1]
+
+    col_names = AtomStyle2ColNames(atom_style_string)
+    _, i_atomtype, _ = ColNames2AidAtypeMolid(col_names)
+
+    # get mappings
+    mappings, shape_mappings = load_type_mappings(postprocess_path)
     if not mappings:
-        print('Alchemical transformation failed\nNo mappings found in', in_path)
+        print('Alchemical transformation failed\nNo mappings found in', postprocess_path)
         sys.exit(0)
 
-    changed = update_data_atoms(data_path, mappings)
-    print(f'Alchemical transformation\nUpdated {changed} lines in {data_path}\n')
+    # Update data atoms section
+    changed = update_data_atoms(data_path, i_atomtype, mappings)
+    print(f'Alchemical transformation...\nUpdated {changed} lines in {data_path}')
+
+    # Update ellipsoids section, if present
+    if os.path.isfile(ellipsoid_path) and shape_mappings:
+        changed = update_ellipsoids(ellipsoid_path, shape_mappings)
+        print(f'Updated {changed} lines in {ellipsoid_path}')
+    
+    print("done\n")
 
 
 if __name__ == '__main__':
