@@ -23,7 +23,7 @@ except Exception:
 
 def load_type_mappings(in_alchemical_path):
     """
-    The content of the mapping file is based on the LAMMPS set command, as in:
+    The content of the mapping file is based on the LAMMPS set atom command, as in:
     
     set atom mol1[2]/C1 type @atom:OPLSAA/99
     """
@@ -36,20 +36,18 @@ def load_type_mappings(in_alchemical_path):
                 continue
 
             parts = line.split()
-            if len(parts) < 5:
-                continue
-            if parts[0].lower() != 'set' or parts[1].lower() != 'atom':
-                continue
-
-            # add (key, val) tuples to mappings:
-            if parts[3].lower() == 'type':
-                key = parts[2]
-                val = parts[4]
-                mappings.append((key, val))
-            elif parts[3].lower() == 'shape':
-                key = parts[2]
-                val = f"{parts[4]} {parts[5]} {parts[6]}"
-                shape_mappings.append((key, val))
+            # Process the "set atom" commands
+            if parts[0].lower() == 'set' and parts[1].lower() == 'atom':
+                number_parts = len(parts)
+                # add (key, val) tuples to mappings:
+                if parts[3].lower() == 'type' and number_parts >= 5:
+                    key = parts[2]
+                    val = parts[4]
+                    mappings.append((key, val))
+                elif parts[3].lower() == 'shape' and number_parts >= 7:
+                    key = parts[2]
+                    val = f"{parts[4]} {parts[5]} {parts[6]}"
+                    shape_mappings.append((key, val))
 
     return mappings, shape_mappings
 
@@ -140,11 +138,11 @@ def main():
     # Remove surrounding quotes if present
     if (len(atom_style_string) > 2 and
             ((atom_style_string[0] == atom_style_string[-1]) and
-                atom_style_string[0] in ('"', "'"))):
+            atom_style_string[0] in ('"', "'"))):
         atom_style_string = atom_style_string[1:-1]
 
     col_names = AtomStyle2ColNames(atom_style_string)
-    _, i_atomtype, _ = ColNames2AidAtypeMolid(col_names)
+    _, atom_type, _ = ColNames2AidAtypeMolid(col_names)
 
     # get mappings
     mappings, shape_mappings = load_type_mappings(postprocess_path)
@@ -153,7 +151,7 @@ def main():
         sys.exit(0)
 
     # Update data atoms section
-    changed = update_data_atoms(data_path, i_atomtype, mappings)
+    changed = update_data_atoms(data_path, atom_type, mappings)
     print(f'Alchemical transformation...\nUpdated {changed} lines in {data_path}')
 
     # Update ellipsoids section, if present
