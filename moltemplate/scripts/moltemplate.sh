@@ -254,7 +254,7 @@ ${data_impropers_by_type}*
 $data_charge_by_bond
 $in_init
 $in_settings
-${postprocess}*
+$postprocess
 EOF
 )
 
