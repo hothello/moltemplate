@@ -4887,12 +4887,12 @@ delete mol1[2]/H6
 
 # 3. Replace all atomtypes, transforming ethanol in methanol.
 write("Postprocess") {
-	set atom mol1[2]/C1 type @atom:OPLSAA/99
-	set ATOM mol1[2]/H1 type @atom:OPLSAA/98
-	SET ATOM mol1[2]/H2 TYPE @atom:OPLSAA/98
-	SET atom mol1[2]/H3 TYPE @atom:OPLSAA/98
-	set atom mol1[2]/C2 type @atom:OPLSAA/96
-	set atom mol1[2]/H4 type @atom:OPLSAA/97
+	set atom $atom:mol1[2]/C1 type @atom:OPLSAA/99
+	set atom $atom:mol1[2]/H1 type @atom:OPLSAA/98
+	set atom $atom:mol1[2]/H2 TYPE @atom:OPLSAA/98
+	set atom $atom:mol1[2]/H3 TYPE @atom:OPLSAA/98
+	set atom $atom:mol1[2]/C2 type @atom:OPLSAA/96
+	set atom $atom:mol1[2]/H4 type @atom:OPLSAA/97
 }
 \end{verbatim}
 
@@ -4905,8 +4905,8 @@ mol0 = new BENZ[3].move(6.5, 0, 0)
 
 # 2. Transform a plane of disks into rods.
 write_once("Postprocess") {
-	set atom mol0[*][*][2]/ben type @atom:ROD/b1
-	set atom mol0[*][*][2]/ben shape 2.5 2.5 6.5
+	set atom $atom:mol0[*][*][2]/ben type @atom:ROD/b1
+	set atom $atom:mol0[*][*][2]/ben shape 2.5 2.5 6.5
 }
 \end{verbatim}
 

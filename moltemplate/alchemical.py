@@ -10,8 +10,8 @@ Before the remove_duplicate_atoms.py script is invoked in Moltemplate.sh,
 look for specific atom
 """
 g_program_name = __file__.split('/')[-1]  # ='alchemical.py'
-g_date_str = '2025-12-21'
-g_version_str = '0.1.0'
+g_date_str = '2026-01-16'
+g_version_str = '0.1.1'
 
 import sys
 import re
@@ -67,7 +67,7 @@ def make_regex_from_key(key):
                 pieces.append(r'\[\d+\]')
         key_regex = ''.join(pieces)
 
-    pattern = r'^\$/atom:' + key_regex + r'\b'
+    pattern = r'^' + key_regex + r'\b'
     return re.compile(pattern)
 
 
